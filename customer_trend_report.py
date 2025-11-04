@@ -20,45 +20,46 @@ conn_str = (
 )
 conn = pyodbc.connect(conn_str)
 
-# All companies, showing 2023-2025 totals and change from 2024 to 2025
+# All companies, showing 2023-2025 totals
 query = '''
-WITH YearlyTotals AS (
-    SELECT 
-        c.ListID AS CustomerID,
-        c.Name AS CustomerName,
-        YEAR(il.TxnDate) AS PurchaseYear,
-        SUM(il.InvoiceLineAmount) AS TotalPurchased
-    FROM dbo.Customer c
-    JOIN dbo.InvoiceLine il ON c.ListID = il.CustomerRefListID
-    WHERE il.TxnDate IS NOT NULL
-    GROUP BY c.ListID, c.Name, YEAR(il.TxnDate)
+WITH AllCustomerIDs AS (
+    -- First, get a distinct list of all customer IDs that have any activity
+    -- (transaction or shipment) in the target years. This prevents missing customers.
+    SELECT DISTINCT CustomerRefListID
+    FROM dbo.InvoiceLine
+    WHERE 
+        (YEAR(ShipDate) IN (2023, 2024, 2025) OR YEAR(TxnDate) IN (2023, 2024, 2025))
+        AND CustomerRefListID IS NOT NULL
 ),
-Change2025 AS (
+AllCustomers AS (
+    -- Now, join the definitive list of IDs with the Customer table to get their names.
+    SELECT
+        cid.CustomerRefListID AS CustomerID,
+        c.Name AS CustomerName
+    FROM AllCustomerIDs cid
+    JOIN dbo.Customer c ON cid.CustomerRefListID = c.ListID
+),
+YearlyTotals AS (
+    -- This CTE calculates the total purchases for each customer per year based on transaction date.
     SELECT 
-        yt.CustomerID,
-        yt.CustomerName,
-        COALESCE(y2023.TotalPurchased, 0) AS Purchased2023,
-        COALESCE(y2024.TotalPurchased, 0) AS Purchased2024,
-        yt.TotalPurchased AS Purchased2025,
-        (yt.TotalPurchased - COALESCE(y2024.TotalPurchased, 0)) AS Change2025
-    FROM YearlyTotals yt
-    LEFT JOIN YearlyTotals y2024 ON yt.CustomerID = y2024.CustomerID AND y2024.PurchaseYear = 2024
-    LEFT JOIN YearlyTotals y2023 ON yt.CustomerID = y2023.CustomerID AND y2023.PurchaseYear = 2023
-    WHERE yt.PurchaseYear = 2025
+        CustomerRefListID AS CustomerID,
+        YEAR(TxnDate) AS PurchaseYear,
+        SUM(InvoiceLineAmount) AS TotalPurchased
+    FROM dbo.InvoiceLine
+    WHERE TxnDate IS NOT NULL AND YEAR(TxnDate) IN (2023, 2024, 2025)
+    GROUP BY CustomerRefListID, YEAR(TxnDate)
 )
 SELECT
-    CustomerID,
-    CustomerName,
-    Purchased2023,
-    Purchased2024,
-    Purchased2025,
-    Change2025,
-    CASE
-        WHEN Purchased2024 > 0 THEN CAST((Change2025 / Purchased2024) * 100 AS DECIMAL(10,2))
-        ELSE NULL
-    END as PercentageChange
-FROM Change2025
-ORDER BY Change2025 DESC;
+    ac.CustomerID,
+    ac.CustomerName,
+    COALESCE(y2023.TotalPurchased, 0) AS Purchased2023,
+    COALESCE(y2024.TotalPurchased, 0) AS Purchased2024,
+    COALESCE(y2025.TotalPurchased, 0) AS Purchased2025
+FROM AllCustomers ac
+LEFT JOIN YearlyTotals y2023 ON ac.CustomerID = y2023.CustomerID AND y2023.PurchaseYear = 2023
+LEFT JOIN YearlyTotals y2024 ON ac.CustomerID = y2024.CustomerID AND y2024.PurchaseYear = 2024
+LEFT JOIN YearlyTotals y2025 ON ac.CustomerID = y2025.CustomerID AND y2025.PurchaseYear = 2025
+ORDER BY ac.CustomerName;
 '''
 
 # Run query and fetch results
@@ -68,8 +69,6 @@ results = pd.read_sql(query, conn)
 total_2023 = results['Purchased2023'].sum()
 total_2024 = results['Purchased2024'].sum()
 total_2025 = results['Purchased2025'].sum()
-total_change = total_2025 - total_2024
-percent_change = (total_change / total_2024 * 100) if total_2024 > 0 else 0
 
 # Create a copy of results for display
 display_results = results.copy()
@@ -78,12 +77,9 @@ display_results = results.copy()
 display_results['Purchased2023'] = display_results['Purchased2023'].apply(lambda x: f'${x:,.2f}')
 display_results['Purchased2024'] = display_results['Purchased2024'].apply(lambda x: f'${x:,.2f}')
 display_results['Purchased2025'] = display_results['Purchased2025'].apply(lambda x: f'${x:,.2f}')
-display_results['Change2025'] = display_results['Change2025'].apply(lambda x: f'${x:,.2f}')
-display_results['PercentageChange'] = display_results['PercentageChange'].apply(lambda x: f'{x:.2f}%' if pd.notnull(x) else 'N/A')
 
 # Display results in a formatted table
-print('\nCustomer Purchase Change Report 2023-2025 (All Companies)')
-print('Ordered by largest change from 2024 to 2025')
+print('\nCustomer Purchase Report 2023-2025 (All Companies)')
 print('-' * 120)
 print(results.to_string(index=False))
 print('-' * 120)
@@ -92,11 +88,9 @@ print(f'\nSummary:')
 print(f'Total Sales 2023: ${total_2023:,.2f}')
 print(f'Total Sales 2024: ${total_2024:,.2f}')
 print(f'Total Sales 2025: ${total_2025:,.2f}')
-print(f'Total Change 2024→2025: ${total_change:,.2f}')
-print(f'Percentage Change 2024→2025: {percent_change:.2f}%')
 
 # Save to Excel for easy desktop viewing
-excel_path = 'customer_change_report_2025.xlsx'
+excel_path = 'customer_trend_report_comprehensive.xlsx'
 results.to_excel(excel_path, index=False)
 
 # Magnitude-based color coding for change (2024→2025)
@@ -120,17 +114,21 @@ def get_green_shade(magnitude, max_magnitude):
         hex_color = 'FFC6EFCE'
     return PatternFill(start_color=hex_color, end_color=hex_color, fill_type='solid')
 
-# Find max decline/gain for scaling
-changes = [ws[f'F{row}'].value for row in range(2, ws.max_row + 1)]
-max_decline = abs(min(changes)) if changes else 1
-max_gain = max(changes) if changes else 1
-
+# Highlight for Top Year
+yellow_fill = PatternFill(start_color='FFFFFF00', end_color='FFFFFF00', fill_type='solid')
 for row in range(2, ws.max_row + 1):
-    change = ws[f'F{row}'].value
-    if change > 0:
-        ws[f'F{row}'].fill = get_green_shade(change, max_gain)
-    elif change < 0:
-        ws[f'F{row}'].fill = get_red_shade(abs(change), max_decline)
+    # Highlight Top Year
+    purchases = {
+        'C': ws[f'C{row}'].value,
+        'D': ws[f'D{row}'].value,
+        'E': ws[f'E{row}'].value
+    }
+    
+    # Find the max purchase value, ignoring non-numeric values
+    numeric_purchases = {k: v for k, v in purchases.items() if isinstance(v, (int, float))}
+    if numeric_purchases:
+        max_year_col = max(numeric_purchases, key=numeric_purchases.get)
+        ws[f'{max_year_col}{row}'].fill = yellow_fill
 
 wb.save(excel_path)
-print('\nReport saved to customer_change_report_2025.xlsx with magnitude-based color coding.')
+print('\nReport saved to customer_trend_report_comprehensive.xlsx.')

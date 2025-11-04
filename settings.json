@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "mssql": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-mssql"
+      ],
+      "env": {
+        "MSSQL_SERVER": "192.168.68.54",
+        "MSSQL_DATABASE": "pcay",
+        "MSSQL_USER": "paradise",
+        "MSSQL_PASSWORD": "paradise1",
+        "MSSQL_PORT": "1433",
+        "MSSQL_REQUEST_TIMEOUT": "18000000",
+        "MSSQL_OPTION_TRUST_SERVER_CERTIFICATE": "true"
+      }
+    }
+  }
+}
