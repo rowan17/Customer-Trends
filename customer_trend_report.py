@@ -92,6 +92,11 @@ try:
 
     # --- Excel Export and Formatting ---
     excel_path = 'customer_change_report_last_6_years.xlsx'
+    
+    # Insert empty columns for spacing
+    contact_name_index = results.columns.get_loc('ContactName')
+    results.insert(contact_name_index + 1, ' ', '')
+
     results.to_excel(excel_path, index=False)
 
     # Load workbook for formatting
@@ -117,7 +122,7 @@ try:
         total_sales_col_idx = -1 # TotalSales column not found
 
     # Find the columns for the years
-    year_columns_indices = [i for i, h in enumerate(headers) if h.startswith('Purchased')]
+    year_columns_indices = [i for i, h in enumerate(headers) if h and h.startswith('Purchased')]
 
     for row in range(2, ws.max_row + 1):
         # Determine which cells to highlight
