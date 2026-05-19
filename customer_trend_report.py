@@ -1,9 +1,21 @@
 import pyodbc
 import pandas as pd
+import logging
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from datetime import datetime
+
+# --- Logging ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s',
+    handlers=[
+        logging.FileHandler('customer_trend_report.log', mode='w', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # --- Configuration ---
 # MSSQL connection details
@@ -77,6 +89,7 @@ ORDER BY c.Name;
 
 # --- Database Connection and Query Execution ---
 try:
+    logger.info('Starting customer trend report run')
     conn_str = (
         f'DRIVER={{ODBC Driver 18 for SQL Server}};'
         f'SERVER={server};'
@@ -85,10 +98,13 @@ try:
         f'PWD={password};'
         f'TrustServerCertificate=yes;'
     )
+    logger.info('Connecting to SQL Server')
     conn = pyodbc.connect(conn_str)
     
     # Run query and fetch results
+    logger.info('Running main query')
     results = pd.read_sql(query, conn)
+    logger.info('Query returned %d rows', len(results))
     
     # --- Report Generation ---
     print(f'\nCustomer Purchase Report for 2023-2026')
@@ -120,16 +136,26 @@ try:
     for year in YEARS_FULL_YEAR:
         col_full = f'Purchased{year}FullYear'
         col_ytd = f'Purchased{year}YTD'
-        total_full = pd.read_sql(f"SELECT SUM(CASE WHEN YEAR(COALESCE(TxnDate, ShipDate)) = {year} THEN InvoiceLineAmount ELSE 0 END) as total FROM dbo.InvoiceLine WHERE CustomerRefListID IS NOT NULL", conn).iloc[0, 0]
-        total_ytd = pd.read_sql(f"SELECT SUM(CASE WHEN YEAR(COALESCE(TxnDate, ShipDate)) = {year} AND DATEPART(dy, COALESCE(TxnDate, ShipDate)) <= {day_of_year} THEN InvoiceLineAmount ELSE 0 END) as total FROM dbo.InvoiceLine WHERE CustomerRefListID IS NOT NULL", conn).iloc[0, 0]
+        total_full = pd.read_sql(
+            f"SELECT SUM(CASE WHEN YEAR(COALESCE(TxnDate, ShipDate)) = {year} THEN InvoiceLineAmount ELSE 0 END) as total FROM dbo.InvoiceLine WHERE CustomerRefListID IS NOT NULL",
+            conn
+        ).iloc[0, 0]
+        total_ytd = pd.read_sql(
+            f"SELECT SUM(CASE WHEN YEAR(COALESCE(TxnDate, ShipDate)) = {year} AND DATEPART(dy, COALESCE(TxnDate, ShipDate)) <= {day_of_year} THEN InvoiceLineAmount ELSE 0 END) as total FROM dbo.InvoiceLine WHERE CustomerRefListID IS NOT NULL",
+            conn
+        ).iloc[0, 0]
         print(f'{year}: ${total_full:,.2f} / ${total_ytd:,.2f}')
     
     for year in YEAR_YTD_ONLY:
-        total_ytd = pd.read_sql(f"SELECT SUM(CASE WHEN YEAR(COALESCE(TxnDate, ShipDate)) = {year} AND DATEPART(dy, COALESCE(TxnDate, ShipDate)) <= {day_of_year} THEN InvoiceLineAmount ELSE 0 END) as total FROM dbo.InvoiceLine WHERE CustomerRefListID IS NOT NULL", conn).iloc[0, 0]
+        total_ytd = pd.read_sql(
+            f"SELECT SUM(CASE WHEN YEAR(COALESCE(TxnDate, ShipDate)) = {year} AND DATEPART(dy, COALESCE(TxnDate, ShipDate)) <= {day_of_year} THEN InvoiceLineAmount ELSE 0 END) as total FROM dbo.InvoiceLine WHERE CustomerRefListID IS NOT NULL",
+            conn
+        ).iloc[0, 0]
         print(f'{year}: ${total_ytd:,.2f}')
 
     # --- Excel Export and Formatting ---
     excel_path = 'customer_change_report_last_6_years.xlsx'
+    logger.info('Writing Excel output to %s', excel_path)
     
     # Reorder columns: CustomerName, Year columns, empty space, ContactName, Email, PhoneNumber, BillingAddress
     year_cols = [str(year) for year in YEARS_FULL_YEAR + YEAR_YTD_ONLY]
@@ -145,6 +171,7 @@ try:
     results.to_excel(excel_path, index=False)
 
     # Load workbook for formatting
+    logger.info('Loading workbook for formatting')
     wb = load_workbook(excel_path)
     ws = wb.active
 
@@ -224,8 +251,10 @@ try:
 
     wb.save(excel_path)
     print(f'\nReport saved to {excel_path}.')
+    logger.info('Report saved successfully')
 
 except Exception as e:
+    logger.exception('An error occurred')
     print(f"An error occurred: {e}")
 
 finally:
