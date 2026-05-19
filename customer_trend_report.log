@@ -1,0 +1,7 @@
+2026-05-18 17:07:46,962 INFO Starting customer trend report run
+2026-05-18 17:07:46,962 INFO Connecting to SQL Server
+2026-05-18 17:07:46,990 INFO Running main query
+2026-05-18 17:07:47,801 INFO Query returned 1433 rows
+2026-05-18 17:07:48,669 INFO Writing Excel output to customer_change_report_last_6_years.xlsx
+2026-05-18 17:07:48,807 INFO Loading workbook for formatting
+2026-05-18 17:07:49,188 INFO Report saved successfully
