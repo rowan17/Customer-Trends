@@ -4,7 +4,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 
 # MSSQL connection details
-server = '192.168.68.54'
+server = 'QBSERVER'
 database = 'pcay'
 username = 'paradise'
 password = 'paradise1'
